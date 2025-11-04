@@ -30,6 +30,9 @@ An AI-powered chatbot using OpenAI's GPT-4o-mini model with both CLI and web int
 - 🌐 Web-based UI with dark theme
 - 🔒 Secure API key management
 - ⚡ Fast responses using GPT-4o-mini
+- 🖼️ Image understanding (via Vision)
+- 🎧 Audio transcription (Whisper)
+- 🎞️ Video understanding by sampling frames (no GPU required)
 
 ## Usage
 

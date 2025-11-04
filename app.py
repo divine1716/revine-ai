@@ -13,6 +13,12 @@ from PIL import Image
 import io
 from PyPDF2 import PdfReader
 from docx import Document
+import tempfile
+import numpy as np
+try:
+    import cv2  # for video frame extraction
+except Exception:
+    cv2 = None  # gracefully handle absence during import time
 
 # Load environment variables
 load_dotenv()
@@ -59,6 +65,43 @@ def process_text_file(file_content: bytes, filename: str) -> str:
             return file_content.decode('latin-1')
     except Exception as e:
         return f"Error reading file: {str(e)}"
+
+def extract_video_frames(file_content: bytes, max_frames: int = 8) -> List[bytes]:
+    """
+    Extract up to `max_frames` evenly spaced JPEG frames from a video byte stream.
+    Returns a list of JPEG-encoded image bytes.
+    """
+    if cv2 is None:
+        raise RuntimeError("Video processing requires OpenCV (opencv-python) to be installed.")
+
+    # Write to a temporary file so OpenCV can read it reliably
+    with tempfile.NamedTemporaryFile(suffix=".mp4", delete=True) as tmp:
+        tmp.write(file_content)
+        tmp.flush()
+        cap = cv2.VideoCapture(tmp.name)
+        if not cap.isOpened():
+            raise RuntimeError("Failed to open video file for frame extraction.")
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+        if total_frames <= 0:
+            total_frames = max_frames  # fallback sampling
+
+        # Determine indices to sample
+        step = max(1, total_frames // max_frames)
+        indices = list(range(0, min(total_frames, step * max_frames), step))[:max_frames]
+
+        frames: List[bytes] = []
+        for idx in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+            # Convert BGR to RGB then JPEG-encode
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            success, buf = cv2.imencode('.jpg', frame_rgb, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+            if success:
+                frames.append(buf.tobytes())
+        cap.release()
+        return frames
 
 # Allow connections from your HTML frontend
 app.add_middleware(
@@ -146,8 +189,29 @@ async def chat(
                         )
                         transcript_text = getattr(transcript, 'text', str(transcript))
                         file_contents.append(f"[Audio transcript: {filename}]\n{transcript_text}")
+                        # Add prompt hint so the assistant analyzes paralinguistic cues from the transcript
+                        file_contents.append("[Instruction] From the transcript, infer speaker intent, tone, and emotions.")
                     except Exception as e:
                         file_contents.append(f"[Audio file: {filename}] (transcription error: {str(e)})")
+
+                # Handle video: sample frames and attach as images (Vision API), optionally summarize
+                elif content_type.startswith('video/') or name_lower.endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
+                    try:
+                        frames = extract_video_frames(file_content, max_frames=8)
+                        for i, jpg_bytes in enumerate(frames):
+                            b64 = base64.b64encode(jpg_bytes).decode('utf-8')
+                            image_data.append({
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{b64}",
+                                    "detail": "high"
+                                }
+                            })
+                        file_contents.append(f"[Video: {filename}] Extracted {len(frames)} frames for analysis.")
+                        # Hint the model to reason across frames temporally
+                        file_contents.append("[Instruction] Analyze the video across frames: actions, events order, scene changes, objects, and overall summary.")
+                    except Exception as e:
+                        file_contents.append(f"[Video file: {filename}] (video processing error: {str(e)})")
                 
                 else:
                     file_contents.append(f"[File: {filename} - {content_type or 'unknown type'}]")
