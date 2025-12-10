@@ -29,7 +29,7 @@ load_dotenv()
 app = FastAPI()
 
 # Enhanced conversation store with context tracking
-# Format: {session_id: {"messages": [...], "context": {...}, "user_profile": {...}}}
+# Format: {chat_id: {"messages": [...], "context": {...}, "user_profile": {...}}}
 conversation_store: Dict[str, dict] = {}
 
 # Database setup for persistent chat storage
@@ -460,7 +460,7 @@ def home():
     return FileResponse("static/index.html")
 
 @app.post("/new-chat")
-async def new_chat(title: str = None, user_id: str = "anonymous"):
+async def new_chat(title: Optional[str] = Form(None), user_id: str = Form("anonymous")):
     """Create a new chat with persistent storage"""
     chat_id = chat_manager.create_chat(title, user_id)
     
@@ -673,7 +673,7 @@ async def chat(
         chat_manager.save_message(chat_id, "user", str(user_content), message_context)
 
         # Build enhanced system prompt based on context
-        session_data = conversation_store[session_id]
+        session_data = conversation_store[chat_id]
         user_profile = session_data["user_profile"]
         context = session_data["context"]
         
@@ -778,26 +778,32 @@ async def get_chat_context(chat_id: str):
         "recent_topics": list(set(session_data["context"]["topics"][-10:]))
     }
 
-@app.post("/session/{session_id}/preferences")
-async def update_preferences(session_id: str, preferences: dict):
+@app.post("/chat/{chat_id}/preferences")
+async def update_preferences(chat_id: str, preferences: dict):
     """Update user preferences for better context"""
-    if session_id not in conversation_store:
-        return {"error": "Session not found"}
+    if chat_id not in conversation_store:
+        return {"error": "Chat not found"}
     
-    session_data = conversation_store[session_id]
+    session_data = conversation_store[chat_id]
     session_data["user_profile"].update(preferences)
-    conversation_store[session_id] = session_data
+    conversation_store[chat_id] = session_data
+    
+    # Also update in database
+    chat_manager.update_user_profile(chat_id, session_data["user_profile"])
     
     return {"message": "Preferences updated successfully"}
 
-@app.get("/session/{session_id}/summary")
-async def get_conversation_summary(session_id: str):
+@app.get("/chat/{chat_id}/summary")
+async def get_conversation_summary(chat_id: str):
     """Get AI-generated summary of the conversation"""
-    if session_id not in conversation_store:
-        return {"error": "Session not found"}
-    
-    session_data = conversation_store[session_id]
-    messages = session_data["messages"]
+    if chat_id not in conversation_store:
+        # Try to load from database
+        messages = chat_manager.get_chat_messages(chat_id)
+        if not messages:
+            return {"error": "Chat not found"}
+    else:
+        session_data = conversation_store[chat_id]
+        messages = session_data["messages"]
     
     if len(messages) < 2:
         return {"summary": "Conversation just started"}
@@ -818,10 +824,19 @@ async def get_conversation_summary(session_id: str):
         )
         summary = summary_response.choices[0].message.content
         
+        # Get topics from database if not in memory
+        if chat_id in conversation_store:
+            topics = list(set(conversation_store[chat_id]["context"]["topics"][-5:]))
+            interaction_count = conversation_store[chat_id]["user_profile"]["interaction_count"]
+        else:
+            user_profile = chat_manager.get_user_profile(chat_id)
+            topics = user_profile.get("common_topics", [])[-5:]
+            interaction_count = user_profile.get("interaction_count", 0)
+        
         return {
             "summary": summary,
-            "topics": list(set(session_data["context"]["topics"][-5:])),
-            "interaction_count": session_data["user_profile"]["interaction_count"]
+            "topics": topics,
+            "interaction_count": interaction_count
         }
     except Exception as e:
         return {"error": f"Could not generate summary: {str(e)}"}
