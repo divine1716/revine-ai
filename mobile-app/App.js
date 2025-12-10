@@ -12,29 +12,84 @@ const API_URL = 'https://revine-ai-backend.onrender.com';
 export default function App() {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
-  const [sessionId, setSessionId] = useState(null);
+  const [currentChatId, setCurrentChatId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [contextInfo, setContextInfo] = useState(null);
+  const [chats, setChats] = useState([]);
+  const [showChatList, setShowChatList] = useState(false);
   const flatListRef = useRef(null);
 
   useEffect(() => {
-    createNewSession();
+    loadChats();
   }, []);
 
-  const createNewSession = async () => {
+  const loadChats = async () => {
     try {
-      const response = await axios.post(`${API_URL}/new-session`);
-      setSessionId(response.data.session_id);
-      loadContextInfo(response.data.session_id);
+      const response = await axios.get(`${API_URL}/chats`);
+      setChats(response.data.chats);
+      
+      // If no current chat, create a new one
+      if (!currentChatId && response.data.chats.length === 0) {
+        createNewChat();
+      } else if (!currentChatId && response.data.chats.length > 0) {
+        // Load the most recent chat
+        loadChat(response.data.chats[0].id);
+      }
     } catch (error) {
-      console.error('Error creating session:', error);
+      console.error('Error loading chats:', error);
+      createNewChat();
     }
   };
 
-  const loadContextInfo = async (sessionId) => {
+  const createNewChat = async (title = null) => {
     try {
-      const response = await axios.get(`${API_URL}/session/${sessionId}/context`);
+      const response = await axios.post(`${API_URL}/new-chat`, { title });
+      const newChatId = response.data.chat_id;
+      setCurrentChatId(newChatId);
+      setMessages([]);
+      loadContextInfo(newChatId);
+      loadChats(); // Refresh chat list
+      setShowChatList(false);
+    } catch (error) {
+      console.error('Error creating chat:', error);
+    }
+  };
+
+  const loadChat = async (chatId) => {
+    try {
+      const response = await axios.get(`${API_URL}/chat/${chatId}`);
+      setCurrentChatId(chatId);
+      setMessages(response.data.messages.map(msg => ({
+        id: msg.timestamp || Date.now().toString(),
+        text: msg.content,
+        sender: msg.role === 'user' ? 'user' : 'ai',
+        timestamp: msg.timestamp
+      })));
+      loadContextInfo(chatId);
+      setShowChatList(false);
+    } catch (error) {
+      console.error('Error loading chat:', error);
+    }
+  };
+
+  const deleteChat = async (chatId) => {
+    try {
+      await axios.delete(`${API_URL}/chat/${chatId}`);
+      loadChats();
+      if (currentChatId === chatId) {
+        setCurrentChatId(null);
+        setMessages([]);
+        createNewChat();
+      }
+    } catch (error) {
+      console.error('Error deleting chat:', error);
+    }
+  };
+
+  const loadContextInfo = async (chatId) => {
+    try {
+      const response = await axios.get(`${API_URL}/chat/${chatId}/context`);
       setContextInfo(response.data);
     } catch (error) {
       console.error('Error loading context:', error);
@@ -58,7 +113,7 @@ export default function App() {
     try {
       const formData = new FormData();
       formData.append('message', inputText);
-      formData.append('session_id', sessionId);
+      formData.append('chat_id', currentChatId);
 
       // Attach files
       for (const file of selectedFiles) {
@@ -85,7 +140,8 @@ export default function App() {
       setSelectedFiles([]);
       
       // Update context info after successful message
-      loadContextInfo(sessionId);
+      loadContextInfo(currentChatId);
+      loadChats(); // Refresh chat list to update timestamps
     } catch (error) {
       Alert.alert('Error', 'Failed to send message. Please check your connection.');
       console.error('Error sending message:', error);
@@ -163,7 +219,21 @@ export default function App() {
       <SafeAreaProvider>
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
-            <Text style={styles.headerText}>Revine AI</Text>
+            <View style={styles.headerTop}>
+              <IconButton
+                icon="menu"
+                size={24}
+                onPress={() => setShowChatList(true)}
+                iconColor="#fff"
+              />
+              <Text style={styles.headerText}>Revine AI</Text>
+              <IconButton
+                icon="plus"
+                size={24}
+                onPress={() => createNewChat()}
+                iconColor="#fff"
+              />
+            </View>
             {contextInfo && (
               <View style={styles.contextBar}>
                 <Text style={styles.contextText}>
@@ -239,6 +309,44 @@ export default function App() {
               />
             </View>
           </KeyboardAvoidingView>
+
+          {/* Chat List Modal */}
+          {showChatList && (
+            <View style={styles.chatListOverlay}>
+              <View style={styles.chatListContainer}>
+                <View style={styles.chatListHeader}>
+                  <Text style={styles.chatListTitle}>Your Chats</Text>
+                  <IconButton
+                    icon="close"
+                    size={24}
+                    onPress={() => setShowChatList(false)}
+                    iconColor="#fff"
+                  />
+                </View>
+                <FlatList
+                  data={chats}
+                  keyExtractor={item => item.id}
+                  renderItem={({ item }) => (
+                    <View style={styles.chatItem}>
+                      <View style={styles.chatItemContent} onTouchEnd={() => loadChat(item.id)}>
+                        <Text style={styles.chatTitle}>{item.title}</Text>
+                        <Text style={styles.chatInfo}>
+                          {item.message_count} messages • {new Date(item.updated_at).toLocaleDateString()}
+                        </Text>
+                      </View>
+                      <IconButton
+                        icon="delete"
+                        size={20}
+                        onPress={() => deleteChat(item.id)}
+                        iconColor="#ff6b6b"
+                      />
+                    </View>
+                  )}
+                  style={styles.chatList}
+                />
+              </View>
+            </View>
+          )}
         </SafeAreaView>
       </SafeAreaProvider>
     </PaperProvider>
@@ -332,5 +440,61 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textAlign: 'center',
     marginTop: 2,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  chatListOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chatListContainer: {
+    backgroundColor: '#1a1a2e',
+    width: '90%',
+    maxHeight: '80%',
+    borderRadius: 12,
+    padding: 16,
+  },
+  chatListHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  chatListTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  chatList: {
+    maxHeight: 400,
+  },
+  chatItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
+  },
+  chatItemContent: {
+    flex: 1,
+  },
+  chatTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  chatInfo: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 4,
   },
 });

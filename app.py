@@ -15,6 +15,9 @@ from PyPDF2 import PdfReader
 from docx import Document
 import tempfile
 import numpy as np
+import sqlite3
+import json
+from datetime import datetime
 try:
     import cv2  # for video frame extraction
 except Exception:
@@ -28,6 +31,240 @@ app = FastAPI()
 # Enhanced conversation store with context tracking
 # Format: {session_id: {"messages": [...], "context": {...}, "user_profile": {...}}}
 conversation_store: Dict[str, dict] = {}
+
+# Database setup for persistent chat storage
+def init_database():
+    """Initialize SQLite database for chat storage"""
+    conn = sqlite3.connect('revine_ai_chats.db')
+    cursor = conn.cursor()
+    
+    # Create chats table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS chats (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            user_id TEXT DEFAULT 'anonymous',
+            is_archived BOOLEAN DEFAULT FALSE
+        )
+    ''')
+    
+    # Create messages table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+            id TEXT PRIMARY KEY,
+            chat_id TEXT NOT NULL,
+            role TEXT NOT NULL,
+            content TEXT NOT NULL,
+            context_data TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (chat_id) REFERENCES chats (id)
+        )
+    ''')
+    
+    # Create user_profiles table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS user_profiles (
+            chat_id TEXT PRIMARY KEY,
+            technical_level TEXT DEFAULT 'intermediate',
+            interaction_count INTEGER DEFAULT 0,
+            preferred_response_style TEXT DEFAULT 'detailed',
+            common_topics TEXT,
+            FOREIGN KEY (chat_id) REFERENCES chats (id)
+        )
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+# Initialize database on startup
+init_database()
+
+class ChatManager:
+    """Manages persistent chat storage and retrieval"""
+    
+    @staticmethod
+    def create_chat(title: str = None, user_id: str = "anonymous") -> str:
+        """Create a new chat and return chat_id"""
+        chat_id = str(uuid.uuid4())
+        if not title:
+            title = f"Chat {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
+        conn = sqlite3.connect('revine_ai_chats.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO chats (id, title, user_id)
+            VALUES (?, ?, ?)
+        ''', (chat_id, title, user_id))
+        
+        # Initialize user profile
+        cursor.execute('''
+            INSERT INTO user_profiles (chat_id, common_topics)
+            VALUES (?, ?)
+        ''', (chat_id, json.dumps([])))
+        
+        conn.commit()
+        conn.close()
+        
+        return chat_id
+    
+    @staticmethod
+    def get_chat_list(user_id: str = "anonymous") -> List[dict]:
+        """Get list of all chats for a user"""
+        conn = sqlite3.connect('revine_ai_chats.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT id, title, created_at, updated_at,
+                   (SELECT COUNT(*) FROM messages WHERE chat_id = chats.id) as message_count
+            FROM chats 
+            WHERE user_id = ? AND is_archived = FALSE
+            ORDER BY updated_at DESC
+        ''', (user_id,))
+        
+        chats = []
+        for row in cursor.fetchall():
+            chats.append({
+                "id": row[0],
+                "title": row[1],
+                "created_at": row[2],
+                "updated_at": row[3],
+                "message_count": row[4]
+            })
+        
+        conn.close()
+        return chats
+    
+    @staticmethod
+    def get_chat_messages(chat_id: str) -> List[dict]:
+        """Get all messages for a specific chat"""
+        conn = sqlite3.connect('revine_ai_chats.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT role, content, context_data, timestamp
+            FROM messages 
+            WHERE chat_id = ?
+            ORDER BY timestamp ASC
+        ''', (chat_id,))
+        
+        messages = []
+        for row in cursor.fetchall():
+            message = {
+                "role": row[0],
+                "content": row[1],
+                "timestamp": row[3]
+            }
+            if row[2]:  # context_data
+                message["context"] = json.loads(row[2])
+            messages.append(message)
+        
+        conn.close()
+        return messages
+    
+    @staticmethod
+    def save_message(chat_id: str, role: str, content: str, context_data: dict = None):
+        """Save a message to the database"""
+        message_id = str(uuid.uuid4())
+        
+        conn = sqlite3.connect('revine_ai_chats.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO messages (id, chat_id, role, content, context_data)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (message_id, chat_id, role, content, 
+              json.dumps(context_data) if context_data else None))
+        
+        # Update chat's updated_at timestamp
+        cursor.execute('''
+            UPDATE chats SET updated_at = CURRENT_TIMESTAMP WHERE id = ?
+        ''', (chat_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def update_chat_title(chat_id: str, title: str):
+        """Update chat title"""
+        conn = sqlite3.connect('revine_ai_chats.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE chats SET title = ?, updated_at = CURRENT_TIMESTAMP 
+            WHERE id = ?
+        ''', (title, chat_id))
+        
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def delete_chat(chat_id: str):
+        """Delete a chat and all its messages"""
+        conn = sqlite3.connect('revine_ai_chats.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('DELETE FROM messages WHERE chat_id = ?', (chat_id,))
+        cursor.execute('DELETE FROM user_profiles WHERE chat_id = ?', (chat_id,))
+        cursor.execute('DELETE FROM chats WHERE id = ?', (chat_id,))
+        
+        conn.commit()
+        conn.close()
+    
+    @staticmethod
+    def get_user_profile(chat_id: str) -> dict:
+        """Get user profile for a chat"""
+        conn = sqlite3.connect('revine_ai_chats.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT technical_level, interaction_count, preferred_response_style, common_topics
+            FROM user_profiles WHERE chat_id = ?
+        ''', (chat_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if row:
+            return {
+                "technical_level": row[0],
+                "interaction_count": row[1],
+                "preferred_response_style": row[2],
+                "common_topics": json.loads(row[3]) if row[3] else []
+            }
+        return {
+            "technical_level": "intermediate",
+            "interaction_count": 0,
+            "preferred_response_style": "detailed",
+            "common_topics": []
+        }
+    
+    @staticmethod
+    def update_user_profile(chat_id: str, profile_data: dict):
+        """Update user profile for a chat"""
+        conn = sqlite3.connect('revine_ai_chats.db')
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            UPDATE user_profiles 
+            SET technical_level = ?, interaction_count = ?, 
+                preferred_response_style = ?, common_topics = ?
+            WHERE chat_id = ?
+        ''', (
+            profile_data.get("technical_level", "intermediate"),
+            profile_data.get("interaction_count", 0),
+            profile_data.get("preferred_response_style", "detailed"),
+            json.dumps(profile_data.get("common_topics", [])),
+            chat_id
+        ))
+        
+        conn.commit()
+        conn.close()
+
+# Initialize chat manager
+chat_manager = ChatManager()
 
 # Context analysis system
 class ContextAnalyzer:
@@ -222,11 +459,13 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 def home():
     return FileResponse("static/index.html")
 
-@app.post("/new-session")
-async def new_session():
-    """Create a new conversation session with enhanced context tracking"""
-    session_id = str(uuid.uuid4())
-    conversation_store[session_id] = {
+@app.post("/new-chat")
+async def new_chat(title: str = None, user_id: str = "anonymous"):
+    """Create a new chat with persistent storage"""
+    chat_id = chat_manager.create_chat(title, user_id)
+    
+    # Also create in-memory session for immediate use
+    conversation_store[chat_id] = {
         "messages": [],
         "context": {
             "topics": [],
@@ -234,25 +473,64 @@ async def new_session():
             "conversation_style": "adaptive",
             "expertise_level": "unknown"
         },
-        "user_profile": {
-            "interaction_count": 0,
-            "preferred_response_style": "detailed",
-            "common_topics": [],
-            "technical_level": "intermediate"
-        }
+        "user_profile": chat_manager.get_user_profile(chat_id)
     }
-    return {"session_id": session_id}
+    
+    return {"chat_id": chat_id, "title": title or f"Chat {datetime.now().strftime('%Y-%m-%d %H:%M')}"}
+
+@app.get("/chats")
+async def get_chats(user_id: str = "anonymous"):
+    """Get list of all chats for a user"""
+    return {"chats": chat_manager.get_chat_list(user_id)}
+
+@app.get("/chat/{chat_id}")
+async def get_chat(chat_id: str):
+    """Get a specific chat with all messages"""
+    messages = chat_manager.get_chat_messages(chat_id)
+    user_profile = chat_manager.get_user_profile(chat_id)
+    
+    # Load into memory for continued conversation
+    conversation_store[chat_id] = {
+        "messages": messages,
+        "context": {
+            "topics": user_profile.get("common_topics", []),
+            "user_preferences": {},
+            "conversation_style": "adaptive",
+            "expertise_level": "unknown"
+        },
+        "user_profile": user_profile
+    }
+    
+    return {
+        "chat_id": chat_id,
+        "messages": messages,
+        "user_profile": user_profile
+    }
+
+@app.delete("/chat/{chat_id}")
+async def delete_chat(chat_id: str):
+    """Delete a chat permanently"""
+    chat_manager.delete_chat(chat_id)
+    if chat_id in conversation_store:
+        del conversation_store[chat_id]
+    return {"message": "Chat deleted successfully"}
+
+@app.put("/chat/{chat_id}/title")
+async def update_chat_title(chat_id: str, title: str):
+    """Update chat title"""
+    chat_manager.update_chat_title(chat_id, title)
+    return {"message": "Title updated successfully"}
 
 @app.post("/chat")
 async def chat(
     message: str = Form(...),
-    session_id: Optional[str] = Form(None),
+    chat_id: Optional[str] = Form(None),
     files: Optional[List[UploadFile]] = File(None)
 ):
-    # Create new session if not provided
-    if not session_id or session_id not in conversation_store:
-        session_id = str(uuid.uuid4())
-        conversation_store[session_id] = {
+    # Create new chat if not provided
+    if not chat_id:
+        chat_id = chat_manager.create_chat()
+        conversation_store[chat_id] = {
             "messages": [],
             "context": {
                 "topics": [],
@@ -260,12 +538,21 @@ async def chat(
                 "conversation_style": "adaptive",
                 "expertise_level": "unknown"
             },
-            "user_profile": {
-                "interaction_count": 0,
-                "preferred_response_style": "detailed",
-                "common_topics": [],
-                "technical_level": "intermediate"
-            }
+            "user_profile": chat_manager.get_user_profile(chat_id)
+        }
+    elif chat_id not in conversation_store:
+        # Load existing chat from database
+        messages = chat_manager.get_chat_messages(chat_id)
+        user_profile = chat_manager.get_user_profile(chat_id)
+        conversation_store[chat_id] = {
+            "messages": messages,
+            "context": {
+                "topics": user_profile.get("common_topics", []),
+                "user_preferences": {},
+                "conversation_style": "adaptive",
+                "expertise_level": "unknown"
+            },
+            "user_profile": user_profile
         }
 
     try:
@@ -357,7 +644,7 @@ async def chat(
                 user_content += "\n\n" + "\n\n".join(file_contents)
         
         # Analyze message context
-        session_data = conversation_store[session_id]
+        session_data = conversation_store[chat_id]
         message_context = context_analyzer.analyze_message_context(message, session_data["messages"])
         
         # Update user profile and context
@@ -374,12 +661,16 @@ async def chat(
             session_data["user_profile"]["technical_level"] = "beginner"
         
         # Add user message to conversation history
-        session_data["messages"].append({
+        user_message = {
             "role": "user",
             "content": user_content,
             "context": message_context,
             "timestamp": str(uuid.uuid4())[:8]
-        })
+        }
+        session_data["messages"].append(user_message)
+        
+        # Save to database
+        chat_manager.save_message(chat_id, "user", str(user_content), message_context)
 
         # Build enhanced system prompt based on context
         session_data = conversation_store[session_id]
@@ -432,19 +723,26 @@ Always provide relevant, contextual responses that build upon the conversation h
         session_data["context"]["topics"].extend(response_topics)
         
         # Add AI response to conversation history
-        session_data["messages"].append({
+        ai_message = {
             "role": "assistant",
             "content": reply,
             "topics": response_topics,
             "timestamp": str(uuid.uuid4())[:8]
-        })
+        }
+        session_data["messages"].append(ai_message)
+        
+        # Save to database
+        chat_manager.save_message(chat_id, "assistant", reply, {"topics": response_topics})
+        
+        # Update user profile in database
+        chat_manager.update_user_profile(chat_id, session_data["user_profile"])
         
         # Update conversation store
-        conversation_store[session_id] = session_data
+        conversation_store[chat_id] = session_data
 
         return {
             "reply": reply,
-            "session_id": session_id
+            "chat_id": chat_id
         }
     except Exception as e:
         return {"error": str(e)}
@@ -457,13 +755,22 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=port)
 
 
-@app.get("/session/{session_id}/context")
-async def get_session_context(session_id: str):
-    """Get current session context and user profile"""
-    if session_id not in conversation_store:
-        return {"error": "Session not found"}
+@app.get("/chat/{chat_id}/context")
+async def get_chat_context(chat_id: str):
+    """Get current chat context and user profile"""
+    if chat_id not in conversation_store:
+        # Try to load from database
+        messages = chat_manager.get_chat_messages(chat_id)
+        if not messages:
+            return {"error": "Chat not found"}
+        user_profile = chat_manager.get_user_profile(chat_id)
+        return {
+            "user_profile": user_profile,
+            "message_count": len(messages),
+            "recent_topics": user_profile.get("common_topics", [])[-10:]
+        }
     
-    session_data = conversation_store[session_id]
+    session_data = conversation_store[chat_id]
     return {
         "user_profile": session_data["user_profile"],
         "context": session_data["context"],
