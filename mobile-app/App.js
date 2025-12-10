@@ -7,7 +7,7 @@ import * as ImagePicker from 'expo-image-picker';
 import axios from 'axios';
 
 // Replace with your deployed backend URL
-const API_URL = 'https://your-backend-url.com';
+const API_URL = 'https://revine-ai-backend.onrender.com';
 
 export default function App() {
   const [messages, setMessages] = useState([]);
@@ -15,6 +15,7 @@ export default function App() {
   const [sessionId, setSessionId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
+  const [contextInfo, setContextInfo] = useState(null);
   const flatListRef = useRef(null);
 
   useEffect(() => {
@@ -25,8 +26,18 @@ export default function App() {
     try {
       const response = await axios.post(`${API_URL}/new-session`);
       setSessionId(response.data.session_id);
+      loadContextInfo(response.data.session_id);
     } catch (error) {
       console.error('Error creating session:', error);
+    }
+  };
+
+  const loadContextInfo = async (sessionId) => {
+    try {
+      const response = await axios.get(`${API_URL}/session/${sessionId}/context`);
+      setContextInfo(response.data);
+    } catch (error) {
+      console.error('Error loading context:', error);
     }
   };
 
@@ -72,6 +83,9 @@ export default function App() {
 
       setMessages(prev => [...prev, aiMessage]);
       setSelectedFiles([]);
+      
+      // Update context info after successful message
+      loadContextInfo(sessionId);
     } catch (error) {
       Alert.alert('Error', 'Failed to send message. Please check your connection.');
       console.error('Error sending message:', error);
@@ -150,6 +164,18 @@ export default function App() {
         <SafeAreaView style={styles.container} edges={['top']}>
           <View style={styles.header}>
             <Text style={styles.headerText}>Revine AI</Text>
+            {contextInfo && (
+              <View style={styles.contextBar}>
+                <Text style={styles.contextText}>
+                  {contextInfo.message_count} messages • {contextInfo.user_profile?.technical_level || 'adaptive'} mode
+                </Text>
+                {contextInfo.recent_topics && contextInfo.recent_topics.length > 0 && (
+                  <Text style={styles.topicsText}>
+                    Topics: {contextInfo.recent_topics.slice(0, 3).join(', ')}
+                  </Text>
+                )}
+              </View>
+            )}
           </View>
 
           <FlatList
@@ -291,5 +317,20 @@ const styles = StyleSheet.create({
   selectedFileChip: {
     marginRight: 4,
     marginBottom: 4,
+  },
+  contextBar: {
+    paddingTop: 8,
+    paddingHorizontal: 16,
+  },
+  contextText: {
+    color: '#a0a0a0',
+    fontSize: 12,
+    textAlign: 'center',
+  },
+  topicsText: {
+    color: '#6c5ce7',
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 2,
   },
 });
