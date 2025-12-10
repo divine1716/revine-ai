@@ -456,9 +456,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     uvicorn.run(app, host="0.0.0.0", port=port)
 
-# For Vercel deployment
-app = app
-
 
 @app.get("/session/{session_id}/context")
 async def get_session_context(session_id: str):
