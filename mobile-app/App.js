@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, View, FlatList, KeyboardAvoidingView, Platform, Alert } from 'react-native';
+import { StyleSheet, View, FlatList, KeyboardAvoidingView, Platform, Alert, TouchableOpacity, Modal } from 'react-native';
 import { Provider as PaperProvider, TextInput, IconButton, Text, Card, Chip } from 'react-native-paper';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
@@ -26,25 +26,32 @@ export default function App() {
 
   const loadChats = async () => {
     try {
+      console.log('Loading chats from:', `${API_URL}/chats`);
       const response = await axios.get(`${API_URL}/chats`);
+      console.log('Chats loaded:', response.data.chats);
       setChats(response.data.chats);
       
       // If no current chat, create a new one
       if (!currentChatId && response.data.chats.length === 0) {
+        console.log('No chats found, creating new chat');
         createNewChat();
       } else if (!currentChatId && response.data.chats.length > 0) {
         // Load the most recent chat
+        console.log('Loading most recent chat:', response.data.chats[0].id);
         loadChat(response.data.chats[0].id);
       }
     } catch (error) {
       console.error('Error loading chats:', error);
+      Alert.alert('Error', 'Failed to load chats. Creating new chat.');
       createNewChat();
     }
   };
 
   const createNewChat = async (title = null) => {
     try {
+      console.log('Creating new chat...');
       const response = await axios.post(`${API_URL}/new-chat`, { title });
+      console.log('New chat created:', response.data);
       const newChatId = response.data.chat_id;
       setCurrentChatId(newChatId);
       setMessages([]);
@@ -53,6 +60,7 @@ export default function App() {
       setShowChatList(false);
     } catch (error) {
       console.error('Error creating chat:', error);
+      Alert.alert('Error', 'Failed to create new chat');
     }
   };
 
@@ -223,7 +231,10 @@ export default function App() {
               <IconButton
                 icon="menu"
                 size={24}
-                onPress={() => setShowChatList(true)}
+                onPress={() => {
+                  console.log('Menu button pressed, chats:', chats.length);
+                  setShowChatList(true);
+                }}
                 iconColor="#fff"
               />
               <Text style={styles.headerText}>Revine AI</Text>
@@ -311,11 +322,16 @@ export default function App() {
           </KeyboardAvoidingView>
 
           {/* Chat List Modal */}
-          {showChatList && (
+          <Modal
+            visible={showChatList}
+            animationType="slide"
+            transparent={true}
+            onRequestClose={() => setShowChatList(false)}
+          >
             <View style={styles.chatListOverlay}>
               <View style={styles.chatListContainer}>
                 <View style={styles.chatListHeader}>
-                  <Text style={styles.chatListTitle}>Your Chats</Text>
+                  <Text style={styles.chatListTitle}>Your Chats ({chats.length})</Text>
                   <IconButton
                     icon="close"
                     size={24}
@@ -323,30 +339,63 @@ export default function App() {
                     iconColor="#fff"
                   />
                 </View>
-                <FlatList
-                  data={chats}
-                  keyExtractor={item => item.id}
-                  renderItem={({ item }) => (
-                    <View style={styles.chatItem}>
-                      <View style={styles.chatItemContent} onTouchEnd={() => loadChat(item.id)}>
-                        <Text style={styles.chatTitle}>{item.title}</Text>
-                        <Text style={styles.chatInfo}>
-                          {item.message_count} messages • {new Date(item.updated_at).toLocaleDateString()}
-                        </Text>
-                      </View>
-                      <IconButton
-                        icon="delete"
-                        size={20}
-                        onPress={() => deleteChat(item.id)}
-                        iconColor="#ff6b6b"
-                      />
-                    </View>
-                  )}
-                  style={styles.chatList}
-                />
+                
+                {chats.length === 0 ? (
+                  <View style={styles.emptyState}>
+                    <Text style={styles.emptyText}>No chats yet</Text>
+                    <Text style={styles.emptySubtext}>Start a new conversation!</Text>
+                  </View>
+                ) : (
+                  <FlatList
+                    data={chats}
+                    keyExtractor={item => item.id}
+                    renderItem={({ item }) => (
+                      <TouchableOpacity 
+                        style={[
+                          styles.chatItem,
+                          currentChatId === item.id && styles.activeChatItem
+                        ]}
+                        onPress={() => loadChat(item.id)}
+                      >
+                        <View style={styles.chatItemContent}>
+                          <Text style={styles.chatTitle} numberOfLines={1}>
+                            {item.title}
+                          </Text>
+                          <Text style={styles.chatInfo}>
+                            {item.message_count} messages • {new Date(item.updated_at).toLocaleDateString()}
+                          </Text>
+                        </View>
+                        <IconButton
+                          icon="delete"
+                          size={20}
+                          onPress={() => {
+                            Alert.alert(
+                              'Delete Chat',
+                              'Are you sure you want to delete this chat?',
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                { text: 'Delete', style: 'destructive', onPress: () => deleteChat(item.id) }
+                              ]
+                            );
+                          }}
+                          iconColor="#ff6b6b"
+                        />
+                      </TouchableOpacity>
+                    )}
+                    style={styles.chatList}
+                    showsVerticalScrollIndicator={false}
+                  />
+                )}
+                
+                <TouchableOpacity 
+                  style={styles.newChatButton}
+                  onPress={() => createNewChat()}
+                >
+                  <Text style={styles.newChatButtonText}>+ New Chat</Text>
+                </TouchableOpacity>
               </View>
             </View>
-          )}
+          </Modal>
         </SafeAreaView>
       </SafeAreaProvider>
     </PaperProvider>
@@ -447,54 +496,92 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   chatListOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   chatListContainer: {
     backgroundColor: '#1a1a2e',
-    width: '90%',
-    maxHeight: '80%',
+    width: '100%',
+    maxHeight: '85%',
     borderRadius: 12,
-    padding: 16,
+    padding: 20,
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
   chatListHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 20,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#333',
   },
   chatListTitle: {
     color: '#fff',
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
   },
   chatList: {
     maxHeight: 400,
+    marginBottom: 20,
   },
   chatItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
+    paddingVertical: 15,
+    paddingHorizontal: 10,
+    marginVertical: 2,
+    borderRadius: 8,
+    backgroundColor: '#0f0f1e',
+  },
+  activeChatItem: {
+    backgroundColor: '#6c5ce7',
   },
   chatItemContent: {
     flex: 1,
+    paddingRight: 10,
   },
   chatTitle: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '500',
+    marginBottom: 4,
   },
   chatInfo: {
     color: '#888',
     fontSize: 12,
-    marginTop: 4,
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  emptySubtext: {
+    color: '#888',
+    fontSize: 14,
+  },
+  newChatButton: {
+    backgroundColor: '#6c5ce7',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  newChatButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
 });
