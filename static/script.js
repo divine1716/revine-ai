@@ -4,14 +4,151 @@ const sendBtn = document.getElementById('send-btn');
 const fileInput = document.getElementById('file-input');
 const filePreview = document.getElementById('file-preview');
 let isFirstMessage = true;
-let sessionId = null; // Track conversation session
+let currentChatId = null; // Track current chat
 let selectedFiles = []; // Track selected files
+let chats = []; // Store chat history
 
 // Voice state
 let isRecording = false;
 let mediaRecorder = null;
 let audioChunks = [];
 let ttsEnabled = true;
+
+// Initialize app
+document.addEventListener('DOMContentLoaded', function() {
+  loadChatHistory();
+});
+
+// Chat History Management
+async function loadChatHistory() {
+  try {
+    const response = await fetch('/chats');
+    const data = await response.json();
+    chats = data.chats || [];
+    renderChatHistory();
+    
+    // Load most recent chat or create new one
+    if (chats.length > 0 && !currentChatId) {
+      loadChat(chats[0].id);
+    } else if (chats.length === 0) {
+      createNewChat();
+    }
+  } catch (error) {
+    console.error('Error loading chat history:', error);
+    createNewChat();
+  }
+}
+
+function renderChatHistory() {
+  const chatHistory = document.getElementById('chat-history');
+  
+  if (chats.length === 0) {
+    chatHistory.innerHTML = '<div class="no-chats">No chats yet<br><small>Start a conversation!</small></div>';
+    return;
+  }
+  
+  chatHistory.innerHTML = chats.map(chat => `
+    <div class="history-item ${currentChatId === chat.id ? 'active' : ''}" 
+         onclick="loadChat('${chat.id}')" 
+         data-chat-id="${chat.id}">
+      <div class="chat-info">
+        <span class="chat-title">${chat.title}</span>
+        <small class="chat-meta">${chat.message_count} messages • ${formatDate(chat.updated_at)}</small>
+      </div>
+      <button class="delete-chat-btn" onclick="deleteChat('${chat.id}', event)" title="Delete chat">🗑️</button>
+    </div>
+  `).join('');
+}
+
+async function createNewChat() {
+  try {
+    const response = await fetch('/new-chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'title=' + encodeURIComponent(`Chat ${new Date().toLocaleString()}`)
+    });
+    
+    const data = await response.json();
+    currentChatId = data.chat_id;
+    
+    // Clear current chat
+    clearChatDisplay();
+    
+    // Reload chat history
+    loadChatHistory();
+  } catch (error) {
+    console.error('Error creating new chat:', error);
+  }
+}
+
+async function loadChat(chatId) {
+  try {
+    const response = await fetch(`/chat/${chatId}`);
+    const data = await response.json();
+    
+    currentChatId = chatId;
+    
+    // Clear and load messages
+    clearChatDisplay();
+    
+    if (data.messages && data.messages.length > 0) {
+      data.messages.forEach(message => {
+        if (message.role === 'user') {
+          addMessage(message.content, 'user');
+        } else {
+          addMessage(message.content, 'assistant');
+        }
+      });
+      isFirstMessage = false;
+    } else {
+      isFirstMessage = true;
+    }
+    
+    // Update active chat in sidebar
+    renderChatHistory();
+    
+  } catch (error) {
+    console.error('Error loading chat:', error);
+  }
+}
+
+async function deleteChat(chatId, event) {
+  event.stopPropagation(); // Prevent loading the chat
+  
+  if (!confirm('Are you sure you want to delete this chat?')) {
+    return;
+  }
+  
+  try {
+    await fetch(`/chat/${chatId}`, { method: 'DELETE' });
+    
+    // If deleting current chat, create new one
+    if (currentChatId === chatId) {
+      createNewChat();
+    } else {
+      loadChatHistory();
+    }
+  } catch (error) {
+    console.error('Error deleting chat:', error);
+  }
+}
+
+function clearChatDisplay() {
+  chatBox.innerHTML = '';
+  isFirstMessage = true;
+}
+
+function formatDate(dateString) {
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffTime = Math.abs(now - date);
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  
+  if (diffDays === 1) return 'Today';
+  if (diffDays === 2) return 'Yesterday';
+  if (diffDays <= 7) return `${diffDays} days ago`;
+  return date.toLocaleDateString();
+}
 
 // Auto-resize textarea
 userInput.addEventListener('input', function() {
@@ -98,35 +235,9 @@ if (fileInput) {
 }
 
 // Clear chat
+// This function is now replaced by createNewChat()
 async function clearChat() {
-  // Create new session
-  try {
-    const response = await fetch('/new-session', {
-      method: 'POST'
-    });
-    const data = await response.json();
-    sessionId = data.session_id;
-  } catch (error) {
-    console.error('Failed to create new session:', error);
-    sessionId = null;
-  }
-  
-  chatBox.innerHTML = `
-    <div class="welcome-message">
-      <div class="welcome-icon">🤖</div>
-      <h1>Welcome to Revine AI</h1>
-      <p>Your intelligent assistant powered by GPT-4o-mini</p>
-      <p style="color: #10a37f; font-size: 14px; margin-top: 10px;">✨ Memory & Typing Animation!</p>
-      <div class="suggestions">
-        <button class="suggestion" onclick="sendSuggestion('Explain quantum computing')">🔬 Explain quantum computing</button>
-        <button class="suggestion" onclick="sendSuggestion('Write a Python function')">💻 Write a Python function</button>
-        <button class="suggestion" onclick="sendSuggestion('Tell me a joke')">😄 Tell me a joke</button>
-        <button class="suggestion" onclick="sendSuggestion('Help me learn JavaScript')">📚 Help me learn JavaScript</button>
-      </div>
-    </div>
-  `;
-  isFirstMessage = true;
-  userInput.focus();
+  createNewChat();
 }
 
 // Create message element
@@ -296,7 +407,7 @@ async function sendMessage() {
     // Build multipart form data
     const formData = new FormData();
     formData.append('message', userText || '');
-    if (sessionId) formData.append('session_id', sessionId);
+    if (currentChatId) formData.append('chat_id', currentChatId);
     sendingFiles.forEach((file) => formData.append('files', file, file.name));
 
     const response = await fetch('/chat', {
@@ -306,9 +417,11 @@ async function sendMessage() {
     
     const data = await response.json();
     
-    // Store session ID from response
-    if (data.session_id) {
-      sessionId = data.session_id;
+    // Store chat ID from response
+    if (data.chat_id) {
+      currentChatId = data.chat_id;
+      // Refresh chat history to show updated timestamp
+      loadChatHistory();
     }
     
     // Remove typing indicator
@@ -491,3 +604,8 @@ window.addEventListener('load', () => {
 window.addEventListener('load', () => {
   userInput.focus();
 });
+
+// Settings toggle (placeholder for future features)
+function toggleSettings() {
+  alert('Settings panel coming soon!\n\nFeatures planned:\n• Theme selection\n• Voice settings\n• Export chat history\n• API key management');
+}

@@ -64,6 +64,10 @@ body {
   font-size: 14px;
   transition: all 0.2s;
   color: #a0a0a0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
 }
 
 .history-item:hover {
@@ -73,6 +77,59 @@ body {
 .history-item.active {
   background: #2a2a2a;
   color: #fff;
+}
+
+.chat-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-title {
+  font-weight: 500;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.chat-meta {
+  font-size: 12px;
+  color: #666;
+}
+
+.delete-chat-btn {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all 0.2s;
+  font-size: 12px;
+}
+
+.history-item:hover .delete-chat-btn {
+  opacity: 1;
+}
+
+.delete-chat-btn:hover {
+  background: #ff4444;
+  color: white;
+}
+
+.no-chats {
+  text-align: center;
+  color: #666;
+  padding: 40px 20px;
+  font-size: 14px;
+}
+
+.loading-chats {
+  text-align: center;
+  color: #666;
+  padding: 20px;
+  font-size: 14px;
 }
 
 .sidebar-footer {
@@ -85,6 +142,24 @@ body {
   background: #1a1a1a;
   border-radius: 8px;
   font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-btn {
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s;
+}
+
+.settings-btn:hover {
+  background: #2a2a2a;
+  color: #fff;
 }
 
 /* Main Container */

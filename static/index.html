@@ -23,19 +23,18 @@
   <div class="mobile-overlay" id="mobile-overlay"></div>
 
   <!-- Sidebar -->
-  <div class="sidebar">
+  <div class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <h2>💬 Revine AI</h2>
-      <button class="new-chat-btn" onclick="clearChat()">+ New Chat</button>
+      <button class="new-chat-btn" onclick="createNewChat()">+ New Chat</button>
     </div>
-    <div class="chat-history">
-      <div class="history-item active">
-        <span>📝</span> Current Chat
-      </div>
+    <div class="chat-history" id="chat-history">
+      <div class="loading-chats">Loading chats...</div>
     </div>
     <div class="sidebar-footer">
       <div class="user-info">
         <span>👤 User</span>
+        <button class="settings-btn" onclick="toggleSettings()" title="Settings">⚙️</button>
       </div>
     </div>
   </div>
