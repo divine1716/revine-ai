@@ -2,7 +2,7 @@
 
 An AI-powered chatbot using OpenAI's GPT-4o-mini model with both CLI and web interfaces.
 
-## Setup
+## Setups
 
 1. **Install dependencies:**
    ```bash

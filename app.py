@@ -596,17 +596,23 @@ async def chat(
                 # Handle audio: transcribe then include transcript
                 elif content_type.startswith('audio/'):
                     try:
+                        print(f"🎵 Processing audio file: {filename}, size: {len(file_content)} bytes, type: {content_type}")
                         audio_io = io.BytesIO(file_content)
                         audio_io.name = filename  # OpenAI SDK uses this for filename
+                        
+                        print("🎤 Sending to Whisper for transcription...")
                         transcript = client.audio.transcriptions.create(
                             model="whisper-1",
                             file=audio_io
                         )
                         transcript_text = getattr(transcript, 'text', str(transcript))
+                        print(f"📝 Transcription result: {transcript_text}")
+                        
                         file_contents.append(f"[Audio transcript: {filename}]\n{transcript_text}")
                         # Add prompt hint so the assistant analyzes paralinguistic cues from the transcript
                         file_contents.append("[Instruction] From the transcript, infer speaker intent, tone, and emotions.")
                     except Exception as e:
+                        print(f"❌ Audio transcription error: {str(e)}")
                         file_contents.append(f"[Audio file: {filename}] (transcription error: {str(e)})")
 
                 # Handle video: sample frames and attach as images (Vision API), optionally summarize

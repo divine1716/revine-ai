@@ -465,27 +465,81 @@ const micBtn = document.getElementById('mic-btn');
 if (micBtn) {
   const startRecording = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log('🎤 Requesting microphone access...');
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          sampleRate: 44100
+        } 
+      });
+      
       audioChunks = [];
-      mediaRecorder = new MediaRecorder(stream);
-      mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunks.push(e.data); };
+      
+      // Use supported audio format
+      let mimeType = 'audio/webm;codecs=opus';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/webm';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          mimeType = 'audio/mp4';
+          if (!MediaRecorder.isTypeSupported(mimeType)) {
+            mimeType = ''; // Let browser choose
+          }
+        }
+      }
+      
+      console.log('🎵 Using audio format:', mimeType);
+      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+      
+      mediaRecorder.ondataavailable = (e) => { 
+        console.log('📊 Audio data:', e.data.size, 'bytes');
+        if (e.data.size > 0) audioChunks.push(e.data); 
+      };
+      
       mediaRecorder.onstop = () => {
-        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+        console.log('⏹️ Recording stopped, processing...');
+        const blob = new Blob(audioChunks, { type: mimeType || 'audio/webm' });
+        console.log('🎵 Audio blob:', blob.size, 'bytes');
+        
+        // Stop all tracks
         stream.getTracks().forEach(t => t.stop());
-        // Name with timestamp
-        blob.name = `voice-${Date.now()}.webm`;
-        selectedFiles.push(blob);
+        
+        // Create proper File object
+        const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const audioFile = new File([blob], `voice-${Date.now()}.${extension}`, { 
+          type: mimeType || 'audio/webm' 
+        });
+        
+        console.log('📁 Audio file created:', audioFile.name, audioFile.size, 'bytes');
+        
+        // Add to selected files
+        selectedFiles.push(audioFile);
         updateFilePreview();
-        sendBtn.disabled = !userInput.value.trim() && selectedFiles.length === 0;
+        
+        // Enable send button
+        sendBtn.disabled = false;
+        
         // Auto-send voice message
+        console.log('🚀 Auto-sending voice message...');
         sendMessage();
       };
+      
+      mediaRecorder.onerror = (e) => {
+        console.error('❌ MediaRecorder error:', e);
+        alert('Recording error occurred. Please try again.');
+      };
+      
       mediaRecorder.start();
       isRecording = true;
       micBtn.classList.add('recording');
-      micBtn.title = 'Recording... click to stop';
+      micBtn.title = '🔴 Recording... click to stop';
+      micBtn.style.background = '#ff4444';
+      
+      console.log('🎤 Recording started successfully!');
+      
     } catch (err) {
-      console.error('Mic access error:', err);
+      console.error('❌ Microphone access error:', err);
+      alert('Could not access microphone. Please:\n1. Allow microphone permission\n2. Check if another app is using the mic\n3. Try refreshing the page');
       isRecording = false;
       micBtn.classList.remove('recording');
       micBtn.title = 'Hold to record';
@@ -494,10 +548,12 @@ if (micBtn) {
 
   const stopRecording = () => {
     if (mediaRecorder && isRecording) {
+      console.log('⏹️ Stopping recording...');
       mediaRecorder.stop();
       isRecording = false;
       micBtn.classList.remove('recording');
-      micBtn.title = 'Hold to record';
+      micBtn.style.background = '';
+      micBtn.title = '🎤 Click to record';
     }
   };
 
@@ -608,4 +664,39 @@ window.addEventListener('load', () => {
 // Settings toggle (placeholder for future features)
 function toggleSettings() {
   alert('Settings panel coming soon!\n\nFeatures planned:\n• Theme selection\n• Voice settings\n• Export chat history\n• API key management');
+}// Test m
+icrophone access
+async function testMicrophone() {
+  try {
+    console.log('🧪 Testing microphone access...');
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    console.log('✅ Microphone access granted!');
+    
+    // Test MediaRecorder support
+    const mimeTypes = [
+      'audio/webm;codecs=opus',
+      'audio/webm',
+      'audio/mp4',
+      'audio/ogg'
+    ];
+    
+    console.log('🎵 Supported audio formats:');
+    mimeTypes.forEach(type => {
+      const supported = MediaRecorder.isTypeSupported(type);
+      console.log(`  ${type}: ${supported ? '✅' : '❌'}`);
+    });
+    
+    // Stop the test stream
+    stream.getTracks().forEach(track => track.stop());
+    
+    return true;
+  } catch (error) {
+    console.error('❌ Microphone test failed:', error);
+    return false;
+  }
 }
+
+// Run microphone test on page load
+document.addEventListener('DOMContentLoaded', () => {
+  setTimeout(testMicrophone, 1000);
+});
