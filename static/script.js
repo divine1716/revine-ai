@@ -13,6 +13,8 @@ let isRecording = false;
 let mediaRecorder = null;
 let audioChunks = [];
 let ttsEnabled = true;
+let recordingTimer = null;
+let recordingStartTime = 0;
 
 // Initialize app
 document.addEventListener('DOMContentLoaded', function() {
@@ -374,19 +376,33 @@ async function sendMessage() {
   const userMessage = createMessage(displayText, true);
   chatBox.appendChild(userMessage);
 
-  // If sending audio, show players
+  // If sending audio, show players with enhanced styling
   const contentEl = userMessage.querySelector('.message-content');
   sendingFiles.filter(f => (f.type || '').startsWith('audio/')).forEach((audioFile) => {
     const container = document.createElement('div');
-    container.className = 'message-file';
+    container.className = 'message-file audio-message';
+    
+    const audioHeader = document.createElement('div');
+    audioHeader.innerHTML = '🎤 Voice Message';
+    audioHeader.style.fontWeight = 'bold';
+    audioHeader.style.marginBottom = '8px';
+    container.appendChild(audioHeader);
+    
     const audio = document.createElement('audio');
     audio.controls = true;
     audio.src = URL.createObjectURL(audioFile);
     container.appendChild(audio);
+    
     const name = document.createElement('div');
     name.className = 'message-file-name';
-    name.textContent = audioFile.name || 'voice-message';
+    name.textContent = `${audioFile.name || 'voice-message'} (${formatBytes(audioFile.size)})`;
     container.appendChild(name);
+    
+    const processingNote = document.createElement('div');
+    processingNote.className = 'audio-transcript';
+    processingNote.textContent = 'Processing audio with AI transcription...';
+    container.appendChild(processingNote);
+    
     contentEl.appendChild(container);
   });
   
@@ -433,14 +449,39 @@ async function sendMessage() {
     } else {
       // Create empty message and animate typing
       const { messageDiv, content } = createEmptyBotMessage();
+      
+      // Check if this was a response to a voice message
+      const hasAudioFiles = sendingFiles.some(f => (f.type || '').startsWith('audio/'));
+      if (hasAudioFiles) {
+        const voiceResponseBadge = document.createElement('div');
+        voiceResponseBadge.className = 'voice-response-badge';
+        voiceResponseBadge.innerHTML = '🎤➡️🤖 Voice Response';
+        voiceResponseBadge.style.cssText = `
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white;
+          padding: 4px 8px;
+          border-radius: 12px;
+          font-size: 12px;
+          margin-bottom: 8px;
+          display: inline-block;
+        `;
+        content.appendChild(voiceResponseBadge);
+      }
+      
       chatBox.appendChild(messageDiv);
       
       // Animate the typing
-      await typeMessage(content, data.reply, 15); // 15ms per character
+      await typeMessage(content, data.reply, hasAudioFiles ? 10 : 15); // Faster typing for voice responses
 
-      // Speak the reply if enabled
+      // Enhanced text-to-speech for voice message responses
       if (ttsEnabled) {
-        speakText(data.reply);
+        if (hasAudioFiles) {
+          console.log('🔊 Playing TTS response to voice message');
+          // Slightly slower speech for voice responses
+          speakText(data.reply, 0.9);
+        } else {
+          speakText(data.reply);
+        }
       }
     }
   } catch (error) {
@@ -535,6 +576,19 @@ if (micBtn) {
       micBtn.title = '🔴 Recording... click to stop';
       micBtn.style.background = '#ff4444';
       
+      // Start recording timer
+      recordingStartTime = Date.now();
+      const audioStatus = document.getElementById('audio-status');
+      const audioTimer = document.getElementById('audio-timer');
+      audioStatus.style.display = 'flex';
+      
+      recordingTimer = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+        const minutes = Math.floor(elapsed / 60);
+        const seconds = elapsed % 60;
+        audioTimer.textContent = `${minutes}:${seconds.toString().padStart(2, '0')}`;
+      }, 1000);
+      
       console.log('🎤 Recording started successfully!');
       
     } catch (err) {
@@ -554,6 +608,15 @@ if (micBtn) {
       micBtn.classList.remove('recording');
       micBtn.style.background = '';
       micBtn.title = '🎤 Click to record';
+      
+      // Stop timer
+      if (recordingTimer) {
+        clearInterval(recordingTimer);
+        recordingTimer = null;
+      }
+      
+      const audioStatus = document.getElementById('audio-status');
+      audioStatus.style.display = 'none';
     }
   };
 
@@ -575,15 +638,29 @@ if (ttsToggle) {
   });
 }
 
-function speakText(text) {
+function speakText(text, rate = 1.0) {
   if (!('speechSynthesis' in window)) return;
   try {
     const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 1.0; // speed
+    utter.rate = rate; // Adjustable speed
     utter.pitch = 1.0;
     utter.volume = 1.0;
+    
+    // Use a more natural voice if available
+    const voices = window.speechSynthesis.getVoices();
+    const preferredVoice = voices.find(voice => 
+      voice.name.includes('Natural') || 
+      voice.name.includes('Enhanced') ||
+      voice.lang.startsWith('en')
+    );
+    if (preferredVoice) {
+      utter.voice = preferredVoice;
+    }
+    
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
+    
+    console.log(`🔊 Speaking: "${text.substring(0, 50)}..." at rate ${rate}`);
   } catch (e) {
     console.warn('TTS failed:', e);
   }

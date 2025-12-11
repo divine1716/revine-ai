@@ -593,27 +593,59 @@ async def chat(
                     text_content = process_text_file(file_content, filename)
                     file_contents.append(f"[File: {filename}]\n{text_content}")
                 
-                # Handle audio: transcribe then include transcript
+                # Handle audio: transcribe then include transcript with enhanced analysis
                 elif content_type.startswith('audio/'):
                     try:
                         print(f"🎵 Processing audio file: {filename}, size: {len(file_content)} bytes, type: {content_type}")
+                        
+                        # Validate audio file size (max 25MB for Whisper)
+                        if len(file_content) > 25 * 1024 * 1024:
+                            file_contents.append(f"[Audio file: {filename}] Error: File too large (max 25MB)")
+                            continue
+                        
                         audio_io = io.BytesIO(file_content)
                         audio_io.name = filename  # OpenAI SDK uses this for filename
                         
                         print("🎤 Sending to Whisper for transcription...")
                         transcript = client.audio.transcriptions.create(
                             model="whisper-1",
-                            file=audio_io
+                            file=audio_io,
+                            response_format="verbose_json"  # Get more detailed info
                         )
+                        
                         transcript_text = getattr(transcript, 'text', str(transcript))
                         print(f"📝 Transcription result: {transcript_text}")
                         
-                        file_contents.append(f"[Audio transcript: {filename}]\n{transcript_text}")
-                        # Add prompt hint so the assistant analyzes paralinguistic cues from the transcript
-                        file_contents.append("[Instruction] From the transcript, infer speaker intent, tone, and emotions.")
+                        # Enhanced audio processing
+                        if hasattr(transcript, 'language'):
+                            language = transcript.language
+                            print(f"🌍 Detected language: {language}")
+                        else:
+                            language = "unknown"
+                        
+                        # Add comprehensive audio analysis
+                        audio_analysis = f"""[🎤 Voice Message Analysis]
+Transcript: "{transcript_text}"
+Language: {language}
+Duration: ~{len(file_content) // 16000}s (estimated)
+
+[AI Instructions for Voice Response]
+1. Respond naturally as if this was a spoken conversation
+2. Consider the conversational tone and context
+3. If the user asked a question, provide a direct answer
+4. If appropriate, acknowledge that this was a voice message
+5. Match the user's communication style (formal/casual)
+6. Provide relevant and helpful information based on what they said"""
+                        
+                        file_contents.append(audio_analysis)
+                        
                     except Exception as e:
                         print(f"❌ Audio transcription error: {str(e)}")
-                        file_contents.append(f"[Audio file: {filename}] (transcription error: {str(e)})")
+                        error_msg = str(e)
+                        if "invalid_request_error" in error_msg:
+                            file_contents.append(f"[Audio file: {filename}] Error: Unsupported audio format. Please use MP3, MP4, MPEG, MPGA, M4A, WAV, or WEBM.")
+                        else:
+                            file_contents.append(f"[Audio file: {filename}] Transcription error: {error_msg}")
 
                 # Handle video: sample frames and attach as images (Vision API), optionally summarize
                 elif content_type.startswith('video/') or name_lower.endswith(('.mp4', '.mov', '.avi', '.mkv', '.webm')):
@@ -684,7 +716,7 @@ async def chat(
         context = session_data["context"]
         
         # Create adaptive system prompt
-        system_prompt = f"""You are Revine AI, an advanced AI assistant with contextual understanding. 
+        system_prompt = f"""You are Revine AI, an advanced AI assistant with contextual understanding and voice interaction capabilities.
 
 CONTEXT AWARENESS:
 - User's technical level: {user_profile['technical_level']}
@@ -694,22 +726,37 @@ CONTEXT AWARENESS:
 - User emotion: {message_context['emotion']}
 - Message complexity: {message_context['complexity']}
 
+VOICE MESSAGE HANDLING:
+- When processing voice messages, respond naturally as if in a spoken conversation
+- Acknowledge voice input when appropriate ("I heard you say..." or "Thanks for the voice message")
+- Match the conversational tone - be more casual and natural for voice interactions
+- Provide clear, easy-to-understand responses that work well when read aloud
+- If the audio was unclear, politely ask for clarification
+
 RESPONSE GUIDELINES:
-- Adapt your response style to match the user's technical level
+- Adapt your response style to match the user's technical level and communication method
 - Reference previous conversation topics when relevant
 - If user seems frustrated, be extra helpful and patient
 - For urgent requests, prioritize actionable solutions
 - For learning intents, provide step-by-step explanations
 - For creation requests, offer detailed implementation guidance
+- For voice messages, be conversational and natural
 
 CAPABILITIES:
-- Analyze images, documents, audio, and video files
-- Maintain conversation memory and context
+- Analyze images, documents, audio (with transcription), and video files
+- Maintain conversation memory and context across all interaction types
 - Provide code examples and technical guidance
 - Offer creative and business insights
+- Process voice messages with Whisper transcription
 - Remember user preferences and adapt accordingly
 
-Always provide relevant, contextual responses that build upon the conversation history."""
+AUDIO PROCESSING NOTES:
+- Voice messages are transcribed using Whisper AI
+- Respond to the content and intent, not just the literal transcription
+- Consider the conversational nature of voice communication
+- Be helpful and engaging in your audio responses
+
+Always provide relevant, contextual responses that build upon the conversation history and match the user's preferred communication style."""
 
         # Build messages array with enhanced system message and conversation history
         messages = [

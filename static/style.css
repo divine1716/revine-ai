@@ -880,15 +880,58 @@ body {
   background: #333;
 }
 
+.audio-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: #ff4444;
+  border-radius: 12px;
+  font-size: 12px;
+  color: white;
+  animation: pulse 1s infinite;
+}
+
+.audio-status::before {
+  content: '🔴';
+  animation: blink 1s infinite;
+}
+
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0.3; }
+}
+
 /* Audio file preview */
 .message-file audio {
   width: 100%;
   max-width: 300px;
   margin: 8px 0;
+  border-radius: 8px;
 }
 
 .message-file-name {
   font-size: 12px;
   color: #666;
   margin-top: 4px;
+}
+
+/* Audio message styling */
+.audio-message {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 12px;
+  border-radius: 12px;
+  margin: 8px 0;
+}
+
+.audio-transcript {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 8px;
+  border-radius: 8px;
+  margin-top: 8px;
+  font-style: italic;
+}
+
+.audio-transcript::before {
+  content: '🎤 ';
 }

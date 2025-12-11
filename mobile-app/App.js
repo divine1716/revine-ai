@@ -4,6 +4,7 @@ import { Provider as PaperProvider, TextInput, IconButton, Text, Card, Chip } fr
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import * as ImagePicker from 'expo-image-picker';
+import { Audio } from 'expo-av';
 import axios from 'axios';
 
 // Replace with your deployed backend URL
@@ -201,6 +202,64 @@ export default function App() {
     }
   };
 
+  const recordAudio = async () => {
+    try {
+      // Request audio recording permission
+      const { status } = await Audio.requestPermissionsAsync();
+      
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please grant microphone access to record voice messages.');
+        return;
+      }
+
+      // Configure audio recording
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const recording = new Audio.Recording();
+      
+      try {
+        await recording.prepareToRecordAsync(Audio.RECORDING_OPTIONS_PRESET_HIGH_QUALITY);
+        await recording.startAsync();
+        
+        Alert.alert(
+          'Recording Audio',
+          'Tap OK when finished recording',
+          [
+            {
+              text: 'Stop Recording',
+              onPress: async () => {
+                try {
+                  await recording.stopAndUnloadAsync();
+                  const uri = recording.getURI();
+                  
+                  if (uri) {
+                    const audioFile = {
+                      uri: uri,
+                      name: `voice_${Date.now()}.m4a`,
+                      mimeType: 'audio/m4a'
+                    };
+                    setSelectedFiles(prev => [...prev, audioFile]);
+                  }
+                } catch (error) {
+                  console.error('Error stopping recording:', error);
+                }
+              }
+            }
+          ]
+        );
+      } catch (error) {
+        console.error('Error starting recording:', error);
+        Alert.alert('Error', 'Could not start recording. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error setting up audio:', error);
+      Alert.alert('Error', 'Could not access microphone. Please check permissions.');
+    }
+  };
+
   const removeFile = (index) => {
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
@@ -288,6 +347,12 @@ export default function App() {
             keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
           >
             <View style={styles.inputContainer}>
+              <IconButton
+                icon="microphone"
+                size={24}
+                onPress={recordAudio}
+                iconColor="#6c5ce7"
+              />
               <IconButton
                 icon="image"
                 size={24}
