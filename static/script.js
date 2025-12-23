@@ -733,7 +733,7 @@ window.addEventListener('load', () => {
   observer.observe(sidebar, { attributes: true, attributeFilter: ['class'] });
 });
 
-// Focus input on load
+// .2Focus input on load
 window.addEventListener('load', () => {
   userInput.focus();
 });
@@ -741,8 +741,8 @@ window.addEventListener('load', () => {
 // Settings toggle (placeholder for future features)
 function toggleSettings() {
   alert('Settings panel coming soon!\n\nFeatures planned:\n• Theme selection\n• Voice settings\n• Export chat history\n• API key management');
-}// Test m
-icrophone access
+}
+// Test mmicrophone access
 async function testMicrophone() {
   try {
     console.log('🧪 Testing microphone access...');
